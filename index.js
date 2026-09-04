@@ -28,6 +28,11 @@ const { formidable } = require('formidable');  // formidable v3 用 named import
 function getUploadConfig() {
   // TODO: 實作此函式
   // 提示：用 || 給預設值；MAX_FILE_SIZE_MB 是字串，記得先 Number() 轉型再換算 bytes
+  return {
+    uploadDir: process.env.UPLOAD_DIR || '/tmp',
+    maxFileSize: Number(process.env.MAX_FILE_SIZE_MB) * 1024 * 1024 || 5 * 1024 * 1024,
+    gymName: process.env.GYM_NAME || '未命名健身房',
+  };
 }
 
 // ========== 任務二：取副檔名 ==========
@@ -51,6 +56,13 @@ function getUploadConfig() {
 function getFileExtension(filename) {
   // TODO: 實作此函式
   // 提示：用 lastIndexOf('.') 找最後一個 .，toLowerCase() 轉小寫
+  
+  if (filename.lastIndexOf('.') === -1) {
+    return '';
+  }
+  return filename.slice(filename.lastIndexOf('.')).toLowerCase();
+
+
 }
 
 // ========== 任務三：解析檔案 metadata ==========
@@ -76,6 +88,11 @@ function getFileExtension(filename) {
 function parseFileMetadata(file) {
   // TODO: 實作此函式
   // 提示：呼叫 getFileExtension 取副檔名，Math.round(size / 1024) 算 KB
+  return {
+    filename: file.originalFilename,
+    sizeKB: Math.round(file.size / 1024),
+    ext: getFileExtension(file.originalFilename),
+  };
 }
 
 // ========== 任務四：產出 upload log 字串 ==========
@@ -98,6 +115,7 @@ function parseFileMetadata(file) {
 function formatUploadLog(meta, config) {
   // TODO: 實作此函式
   // 提示：用 template literal 組字串
+  return `[${config.gymName}] Uploaded ${meta.filename} (${meta.sizeKB} KB) → ${config.uploadDir}`;
 }
 
 // ========== 任務五：路由分派 ==========
@@ -124,7 +142,9 @@ function formatUploadLog(meta, config) {
  * @example
  *   // 在 createUploadServer 裡：
  *   http.createServer((req, res) => router(req, res, config))
+ * 
  */
+
 function router(req, res, config) {
   // TODO: 實作此函式
   // 建議（非強制）：
@@ -137,6 +157,55 @@ function router(req, res, config) {
   //     form.on('error', (err) => {
   //       console.log(err); // 記錄 log、清理暫存檔、額外監控可以寫在這邊
   //     });  
+  if (req.method === 'POST' && req.url === '/coaches/avatar') {
+    handleUpload(req, res, config);
+  } else {
+    handleNotFound(req, res);
+  }
+
+}
+function handleUpload(req, res, config) {
+  // 建立 formidable 實例
+  const form = formidable({
+    uploadDir: config.uploadDir,
+    maxFileSize: config.maxFileSize,
+    keepExtensions: true,
+  });
+
+  // 處理 formidable 錯誤
+  form.on('error', (err) => {
+    console.log(err);
+  });
+  // 解析檔案
+  form.parse(req, (err, fields, files) => {
+    if (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+      return;
+    }
+    // 檢查是否有檔案
+    const uploaded = files.file;
+    // 檢查是否有多個檔案 並且至少有一個檔案
+    if (!Array.isArray(uploaded) || uploaded.length === 0) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'No file uploaded' }));
+      return;
+    }
+    // 取得第一個檔案 並且是第一個檔案 如果只有一個檔案 則直接使用
+    const file = Array.isArray(uploaded) ? uploaded[0] : uploaded;
+    // 解析檔案 metadata
+    const meta = parseFileMetadata(file);
+    // 格式化上傳日誌
+    const log = formatUploadLog(meta, config);
+    console.log(log);
+    // 回傳 response
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ filename: file.originalFilename, sizeKB: meta.sizeKB, ext: meta.ext, savedPath: file.filepath }));
+  });
+}
+function handleNotFound(req, res) {
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Not Found' }));
 }
 
 // ========== 任務六：建立上傳 server ==========
@@ -158,6 +227,10 @@ function router(req, res, config) {
 function createUploadServer(config) {
   // TODO: 實作此函式
   // 提示：主邏輯都在 router 裡，這邊函式內容不多
+  if (!fs.existsSync(config.uploadDir)) {
+    fs.mkdirSync(config.uploadDir, { recursive: true });
+  }
+  return http.createServer((req, res) => router(req, res, config)); 
 }
 
 module.exports = {
